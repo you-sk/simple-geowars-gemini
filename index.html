@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ツインスティックシューティング (機能追加版)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            font-family: 'Consolas', 'Monaco', monospace;
+            overflow: hidden;
+        }
+        canvas {
+            background-color: #0a0a0a;
+            display: block;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            border: 1px solid rgba(0, 255, 255, 0.7);
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+        .game-text {
+            color: #fff;
+            text-shadow: 0 0 10px #0ff, 0 0 20px #0ff;
+            text-align: center;
+        }
+        #score-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            font-size: 2em;
+        }
+        #highscore-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            font-size: 1.5em;
+            text-align: right;
+            color: rgba(255, 255, 255, 0.8);
+        }
+        #lives-container {
+            position: absolute;
+            top: 65px;
+            left: 20px;
+            display: flex;
+        }
+        .life-icon {
+             width: 20px;
+             height: 20px;
+             background-color: white;
+             margin-right: 10px;
+             border-radius: 50%; /* 円形に変更 */
+             box-shadow: 0 0 10px white;
+        }
+        #gamepad-status {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            font-size: 1em;
+            color: rgba(255, 255, 255, 0.5);
+        }
+        .overlay {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: rgba(0, 0, 0, 0.7);
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: all;
+        }
+        .overlay h1 { font-size: 5em; margin: 0; }
+        .overlay p { font-size: 2em; margin: 10px 0; }
+        .overlay .prompt { font-size: 1.2em; margin-top: 40px; color: #0ff; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui-container">
+        <div id="score-container" class="game-text">SCORE: 0</div>
+        <div id="highscore-container" class="game-text">HI-SCORE: 0</div>
+        <div id="lives-container"></div>
+        <div id="gamepad-status" class="game-text">キーボードで操作: WASDで移動, 矢印キーでショット<br>ゲームパッドを接続してください</div>
+    </div>
+    
+    <div id="start-screen" class="overlay">
+        <h1 class="game-text">GEOMETRY WARS</h1>
+        <p class="prompt">Press ENTER or Gamepad Button to START</p>
+    </div>
+
+    <div id="game-over-screen" class="overlay hidden">
+        <h1 class="game-text">GAME OVER</h1>
+        <p id="final-score" class="game-text">YOUR SCORE: 0</p>
+        <p class="prompt">Press ENTER or Gamepad Button to RESTART</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI要素
+        const scoreEl = document.getElementById('score-container');
+        const highscoreEl = document.getElementById('highscore-container');
+        const livesEl = document.getElementById('lives-container');
+        const startScreen = document.getElementById('start-screen');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const finalScoreEl = document.getElementById('final-score');
+        const gamepadStatusEl = document.getElementById('gamepad-status');
+
+        // ゲーム状態
+        let gameState = 'START'; // START, PLAYING, GAMEOVER
+        let score = 0;
+        let highScore = 0;
+        let lives = 3;
+        let animationFrameId;
+        let gamepad = null;
+        let screenShake = { duration: 0, magnitude: 0 };
+
+        // 定数
+        const PLAYER_INVINCIBILITY_FRAMES = 180; // 3秒 (60fps)
+
+        // ハイスコアをlocalStorageから読み込み
+        function loadHighScore() {
+            const savedHighScore = localStorage.getItem('twinStickHighScore');
+            highScore = savedHighScore ? parseInt(savedHighScore, 10) : 0;
+            highscoreEl.textContent = `HI-SCORE: ${highScore}`;
+        }
+
+        // ハイスコアをlocalStorageに保存
+        function saveHighScore() {
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('twinStickHighScore', highScore);
+                highscoreEl.textContent = `HI-SCORE: ${highScore}`;
+            }
+        }
+
+        // キャンバスのサイズをウィンドウに合わせる
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // キー入力状態を管理
+        const keys = {
+            w: false, a: false, s: false, d: false,
+            ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false,
+            Enter: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+        });
+        
+        // --- ゲームパッド処理 ---
+        window.addEventListener("gamepadconnected", (e) => {
+            gamepad = e.gamepad;
+            gamepadStatusEl.textContent = `ゲームパッド接続中: ${gamepad.id}`;
+            gamepadStatusEl.style.color = '#0ff';
+        });
+        window.addEventListener("gamepaddisconnected", (e) => {
+            gamepad = null;
+            gamepadStatusEl.innerHTML = `キーボードで操作: WASDで移動, 矢印キーでショット<br>ゲームパッドを接続してください`;
+            gamepadStatusEl.style.color = 'rgba(255,255,255,0.5)';
+        });
+
+        // ユーティリティ関数
+        function getRandom(min, max) { return Math.random() * (max - min) + min; }
+
+        // --- クラス定義 ---
+        class Vector {
+            constructor(x, y) { this.x = x; this.y = y; }
+            get magnitude() { return Math.sqrt(this.x * this.x + this.y * this.y); }
+            normalize() {
+                const mag = this.magnitude;
+                if (mag > 0) { this.x /= mag; this.y /= mag; }
+            }
+        }
+        
+        class Particle {
+            constructor(x, y, color, velocity, size, life) {
+                this.x = x; this.y = y; this.color = color; this.velocity = velocity;
+                this.size = size; this.life = life; this.initialLife = life;
+            }
+            draw() {
+                ctx.save();
+                ctx.globalAlpha = this.life / this.initialLife;
+                ctx.fillStyle = this.color; ctx.shadowColor = this.color; ctx.shadowBlur = 10;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+            update() { this.x += this.velocity.x; this.y += this.velocity.y; this.life--; }
+        }
+
+        class Player {
+            constructor(x, y, radius, color) {
+                this.x = x; this.y = y; this.radius = radius; this.color = color;
+                this.speed = 5; this.shootCooldown = 0;
+                this.isInvincible = false; this.invincibilityTimer = 0;
+            }
+            draw() {
+                ctx.save();
+                if (this.isInvincible) {
+                    // 点滅エフェクト
+                    ctx.globalAlpha = this.invincibilityTimer % 20 < 10 ? 0.5 : 1;
+                }
+                ctx.fillStyle = this.color; ctx.shadowColor = this.color; ctx.shadowBlur = 20;
+                ctx.beginPath();
+                // 円形の自機に変更
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+            update() {
+                // 無敵時間処理
+                if (this.invincibilityTimer > 0) {
+                    this.invincibilityTimer--;
+                } else {
+                    this.isInvincible = false;
+                }
+
+                // 入力処理
+                let moveX = 0, moveY = 0, shootX = 0, shootY = 0;
+                const deadzone = 0.25;
+                if (gamepad) {
+                    const myGamepad = navigator.getGamepads()[gamepad.index];
+                    if(myGamepad) {
+                        const leftStickX = myGamepad.axes[0]; const leftStickY = myGamepad.axes[1];
+                        if (Math.abs(leftStickX) > deadzone) moveX = leftStickX;
+                        if (Math.abs(leftStickY) > deadzone) moveY = leftStickY;
+                        const rightStickX = myGamepad.axes[2]; const rightStickY = myGamepad.axes[3];
+                        if (Math.abs(rightStickX) > deadzone) shootX = rightStickX;
+                        if (Math.abs(rightStickY) > deadzone) shootY = rightStickY;
+                    }
+                }
+                if (moveX === 0 && moveY === 0) {
+                    if (keys.w) moveY -= 1; if (keys.s) moveY += 1;
+                    if (keys.a) moveX -= 1; if (keys.d) moveX += 1;
+                }
+                if (shootX === 0 && shootY === 0) {
+                    if (keys.ArrowUp) shootY -= 1; if (keys.ArrowDown) shootY += 1;
+                    if (keys.ArrowLeft) shootX -= 1; if (keys.ArrowRight) shootX += 1;
+                }
+                
+                // 移動処理
+                const moveVec = new Vector(moveX, moveY);
+                if (moveVec.magnitude > 0) {
+                    const moveSpeed = this.speed * Math.min(1, moveVec.magnitude);
+                    moveVec.normalize();
+                    this.x += moveVec.x * moveSpeed; this.y += moveVec.y * moveSpeed;
+                }
+                this.x = Math.max(this.radius, Math.min(canvas.width - this.radius, this.x));
+                this.y = Math.max(this.radius, Math.min(canvas.height - this.radius, this.y));
+
+                // 射撃処理
+                if (this.shootCooldown > 0) this.shootCooldown--;
+                const shootVec = new Vector(shootX, shootY);
+                if (shootVec.magnitude > 0 && this.shootCooldown === 0) {
+                    shootVec.normalize();
+                    const velocity = { x: shootVec.x * 7, y: shootVec.y * 7 };
+                    projectiles.push(new Projectile(this.x, this.y, 5, 'cyan', velocity));
+                    this.shootCooldown = 5;
+                }
+            }
+        }
+
+        class Projectile {
+            constructor(x, y, radius, color, velocity) {
+                this.x = x; this.y = y; this.radius = radius; this.color = color; this.velocity = velocity;
+            }
+            draw() {
+                ctx.save();
+                ctx.fillStyle = this.color; ctx.shadowColor = this.color; ctx.shadowBlur = 15;
+                ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+            }
+            update() { this.x += this.velocity.x; this.y += this.velocity.y; }
+        }
+
+        class Enemy {
+             constructor(x, y, radius, color, velocity) {
+                this.x = x; this.y = y; this.radius = radius; this.color = color; this.velocity = velocity;
+                this.type = 'seeker';
+                if(Math.random() < 0.2) { this.type = 'wanderer'; this.velocity.x *= 0.5; this.velocity.y *= 0.5; }
+            }
+            draw() {
+                ctx.save();
+                ctx.strokeStyle = this.color; ctx.shadowColor = this.color; ctx.shadowBlur = 20; ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y - this.radius); ctx.lineTo(this.x + this.radius, this.y);
+                ctx.lineTo(this.x, this.y + this.radius); ctx.lineTo(this.x - this.radius, this.y);
+                ctx.closePath(); ctx.stroke();
+                ctx.restore();
+            }
+            update() {
+                if(this.type === 'seeker') {
+                    const angle = Math.atan2(player.y - this.y, player.x - this.x);
+                    this.velocity.x = Math.cos(angle); this.velocity.y = Math.sin(angle);
+                }
+                this.x += this.velocity.x * 2; this.y += this.velocity.y * 2;
+            }
+        }
+
+        // --- ゲーム管理 ---
+        let player;
+        let projectiles;
+        let enemies;
+        let particles;
+        let enemySpawnTimer;
+
+        function init() {
+            loadHighScore();
+            startScreen.classList.remove('hidden');
+            gameOverScreen.classList.add('hidden');
+            animate();
+        }
+
+        function startGame() {
+            gameState = 'PLAYING';
+            score = 0;
+            lives = 3;
+            scoreEl.textContent = `SCORE: ${score}`;
+            updateLivesUI();
+            
+            player = new Player(canvas.width / 2, canvas.height / 2, 15, 'white');
+            projectiles = [];
+            enemies = [];
+            particles = [];
+            enemySpawnTimer = 100;
+            
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+        }
+
+        function updateLivesUI() {
+            livesEl.innerHTML = '';
+            for (let i = 0; i < lives; i++) {
+                const lifeIcon = document.createElement('div');
+                lifeIcon.className = 'life-icon';
+                livesEl.appendChild(lifeIcon);
+            }
+        }
+
+        function handlePlayerDeath() {
+            if (player.isInvincible) return;
+
+            lives--;
+            updateLivesUI();
+            
+            // 派手な爆発エフェクト
+            for (let i = 0; i < 80; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 10;
+                particles.push(new Particle(player.x, player.y, 'white',
+                    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+                    Math.random() * 4, 60));
+            }
+
+            // 画面シェイク
+            screenShake = { duration: 20, magnitude: 15 };
+
+            // ★★★ ここから追加 ★★★
+            // 画面上のすべての敵を消滅させる
+            enemies.forEach(enemy => {
+                // 敵の爆発エフェクト
+                for (let i = 0; i < enemy.radius * 1.5; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const speed = Math.random() * 5;
+                    particles.push(new Particle(enemy.x, enemy.y, enemy.color,
+                        { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+                        Math.random() * 2 + 1, 30));
+                }
+            });
+            // 敵配列を空にする
+            enemies = [];
+            // ★★★ ここまで追加 ★★★
+
+            if (lives > 0) {
+                // 復活処理
+                player.x = canvas.width / 2;
+                player.y = canvas.height / 2;
+                player.isInvincible = true;
+                player.invincibilityTimer = PLAYER_INVINCIBILITY_FRAMES;
+            } else {
+                triggerGameOver();
+            }
+        }
+
+        function triggerGameOver() {
+            gameState = 'GAMEOVER';
+            saveHighScore();
+            finalScoreEl.textContent = `YOUR SCORE: ${score}`;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function spawnEnemies() {
+            enemySpawnTimer--;
+            if (enemySpawnTimer <= 0) {
+                const radius = getRandom(10, 30);
+                let x, y;
+                if (Math.random() < 0.5) {
+                    x = Math.random() < 0.5 ? 0 - radius : canvas.width + radius;
+                    y = Math.random() * canvas.height;
+                } else {
+                    x = Math.random() * canvas.width;
+                    y = Math.random() < 0.5 ? 0 - radius : canvas.height + radius;
+                }
+                const colors = ['#ff00ff', '#ff9900', '#ffff00', '#00ff00'];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                const angle = Math.atan2(player.y - y, player.x - x);
+                const velocity = { x: Math.cos(angle), y: Math.sin(angle) };
+                enemies.push(new Enemy(x, y, radius, color, velocity));
+                enemySpawnTimer = Math.max(20, 100 - score / 100);
+            }
+        }
+
+        function drawGrid() {
+            ctx.save();
+            ctx.strokeStyle = "rgba(0, 255, 255, 0.1)"; ctx.lineWidth = 1;
+            const gridSize = 50;
+            for (let x = 0; x < canvas.width; x += gridSize) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += gridSize) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function handleStartInput() {
+            if (gameState === 'START' || gameState === 'GAMEOVER') {
+                let startPressed = keys.Enter;
+                if (gamepad) {
+                    const myGamepad = navigator.getGamepads()[gamepad.index];
+                    // スタートボタン(9)かAボタン(0)
+                    if (myGamepad && (myGamepad.buttons[9].pressed || myGamepad.buttons[0].pressed)) {
+                        startPressed = true;
+                    }
+                }
+                if (startPressed) {
+                    startGame();
+                }
+            }
+        }
+
+        // --- メインループ ---
+        function animate() {
+            animationFrameId = requestAnimationFrame(animate);
+
+            handleStartInput();
+            
+            ctx.save();
+            // 画面シェイク処理
+            if (screenShake.duration > 0) {
+                const dx = (Math.random() - 0.5) * screenShake.magnitude;
+                const dy = (Math.random() - 0.5) * screenShake.magnitude;
+                ctx.translate(dx, dy);
+                screenShake.duration--;
+            }
+
+            // 描画処理
+            ctx.fillStyle = 'rgba(10, 10, 10, 0.2)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            drawGrid();
+
+            if (gameState === 'PLAYING') {
+                player.update();
+                player.draw();
+
+                spawnEnemies();
+
+                particles.forEach((p, i) => {
+                    if (p.life <= 0) particles.splice(i, 1);
+                    else { p.update(); p.draw(); }
+                });
+
+                projectiles.forEach((p, pIndex) => {
+                    p.update(); p.draw();
+                    if (p.x < 0 || p.x > canvas.width || p.y < 0 || p.y > canvas.height) {
+                        setTimeout(() => projectiles.splice(pIndex, 1), 0);
+                    }
+                });
+
+                enemies.forEach((enemy, eIndex) => {
+                    enemy.update();
+                    enemy.draw();
+                    
+                    const distPlayerEnemy = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+                    if (distPlayerEnemy - enemy.radius - player.radius < 1) {
+                        handlePlayerDeath();
+                        // プレイヤーが死んだら敵も消す
+                        // setTimeout(() => enemies.splice(eIndex, 1), 0); // この行は敵全消滅ロジックにより不要
+                    }
+
+                    projectiles.forEach((projectile, pIndex) => {
+                        const dist = Math.hypot(projectile.x - enemy.x, projectile.y - enemy.y);
+                        if (dist - enemy.radius - projectile.radius < 1) {
+                            for (let i = 0; i < enemy.radius * 1.5; i++) {
+                                const angle = Math.random() * Math.PI * 2;
+                                const speed = Math.random() * 5;
+                                particles.push(new Particle(projectile.x, projectile.y, enemy.color,
+                                    { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+                                    Math.random() * 2 + 1, 30));
+                            }
+                            score += 100;
+                            scoreEl.textContent = `SCORE: ${score}`;
+                            setTimeout(() => {
+                                enemies.splice(eIndex, 1);
+                                projectiles.splice(pIndex, 1);
+                            }, 0);
+                        }
+                    });
+                });
+            }
+            ctx.restore(); // 画面シェイクのtranslateをリセット
+        }
+
+        // ゲーム初期化
+        init();
+    </script>
+</body>
+</html>
