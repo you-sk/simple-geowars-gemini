@@ -118,6 +118,67 @@ canvas {
     color: #0ff; 
 }
 
+/* 音量コントロール */
+#audio-controls {
+    position: absolute;
+    bottom: 60px;
+    right: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+#volume-slider {
+    width: 80px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    outline: none;
+    appearance: none;
+}
+
+#volume-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #0ff;
+    box-shadow: 0 0 5px #0ff;
+    cursor: pointer;
+}
+
+#volume-slider::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #0ff;
+    box-shadow: 0 0 5px #0ff;
+    cursor: pointer;
+    border: none;
+}
+
+#audio-toggle {
+    background: none;
+    border: 1px solid rgba(0, 255, 255, 0.5);
+    color: #0ff;
+    padding: 4px 8px;
+    font-size: 0.8em;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.2s;
+}
+
+#audio-toggle:hover {
+    background: rgba(0, 255, 255, 0.1);
+}
+
+#audio-toggle.disabled {
+    color: #666;
+    border-color: #666;
+}
+
 /* ユーティリティクラス */
 .hidden { 
     display: none !important; 

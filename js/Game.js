@@ -2,6 +2,7 @@ import { GAME_CONSTANTS } from './constants.js';
 import { GameState } from './GameState.js';
 import { InputManager } from './InputManager.js';
 import { EntityManager } from './EntityManager.js';
+import { AudioManager } from './AudioManager.js';
 import { Player } from './entities/Player.js';
 import { Enemy } from './entities/Enemy.js';
 
@@ -13,6 +14,7 @@ export class Game {
         this.gameState = new GameState();
         this.inputManager = new InputManager();
         this.entityManager = new EntityManager();
+        this.audioManager = new AudioManager();
         this.player = null;
         this.enemySpawnTimer = 0;
         this.animationFrameId = null;
@@ -29,8 +31,28 @@ export class Game {
             lives: document.getElementById('lives-container'),
             startScreen: document.getElementById('start-screen'),
             gameOverScreen: document.getElementById('game-over-screen'),
-            finalScore: document.getElementById('final-score')
+            finalScore: document.getElementById('final-score'),
+            volumeSlider: document.getElementById('volume-slider'),
+            audioToggle: document.getElementById('audio-toggle')
         };
+        
+        // 音量コントロールの設定
+        this.setupAudioControls();
+    }
+
+    setupAudioControls() {
+        // 音量スライダー
+        this.ui.volumeSlider.addEventListener('input', (e) => {
+            const volume = e.target.value / 100;
+            this.audioManager.setVolume(volume);
+        });
+        
+        // 音声ON/OFFトグル
+        this.ui.audioToggle.addEventListener('click', () => {
+            const enabled = this.audioManager.toggle();
+            this.ui.audioToggle.textContent = enabled ? 'ON' : 'OFF';
+            this.ui.audioToggle.classList.toggle('disabled', !enabled);
+        });
     }
 
     resizeCanvas() {
@@ -51,6 +73,10 @@ export class Game {
         this.entityManager.reset();
         this.player = new Player(this.canvas.width / 2, this.canvas.height / 2);
         this.enemySpawnTimer = GAME_CONSTANTS.GAME.INITIAL_SPAWN_TIMER;
+        
+        // オーディオを有効化（ユーザー操作後）
+        this.audioManager.enableAudio();
+        this.audioManager.playGameStart();
         
         this.ui.startScreen.classList.add('hidden');
         this.ui.gameOverScreen.classList.add('hidden');
@@ -85,6 +111,7 @@ export class Game {
 
         this.gameState.triggerScreenShake();
         this.entityManager.clearAllEnemies();
+        this.audioManager.playPlayerHit();
 
         if (this.gameState.loseLife()) {
             this.player.respawn(this.canvas);
@@ -97,6 +124,7 @@ export class Game {
     gameOver() {
         this.gameState.state = 'GAMEOVER';
         this.gameState.saveHighScore();
+        this.audioManager.playGameOver();
         this.ui.finalScore.textContent = `YOUR SCORE: ${this.gameState.score}`;
         this.ui.gameOverScreen.classList.remove('hidden');
     }
@@ -169,6 +197,9 @@ export class Game {
             // プレイヤー更新
             this.player.update(this.inputManager, this.canvas);
             const projectile = this.player.tryShoot(this.inputManager);
+            if (projectile) {
+                this.audioManager.playPlayerShoot();
+            }
             this.entityManager.addProjectile(projectile);
 
             // 敵スポーン
@@ -195,6 +226,7 @@ export class Game {
                         life: GAME_CONSTANTS.PARTICLE.ENEMY_DEATH_LIFE
                     }
                 );
+                this.audioManager.playEnemyDestroy();
                 this.gameState.addScore(GAME_CONSTANTS.GAME.SCORE_PER_KILL);
                 this.updateUI();
             });
